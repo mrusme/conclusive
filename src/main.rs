@@ -1,5 +1,10 @@
 use std::io;
 use std::env;
+extern crate clap;
+use clap::{
+  Arg,
+  App
+};
 use termion::raw::IntoRawMode;
 use tui::{
   Terminal,
@@ -35,27 +40,42 @@ struct TimeseriesResponse {
     results: Vec<TimeseriesResult>,
 }
 
-pub struct App<'a> {
+pub struct TUI<'a> {
   pub stats: Vec<(&'a str, u64)>
 }
 
-impl<'a> App<'a> {
-  pub fn new(stats: Vec<(&'a str, u64)>) -> App<'a> {
-    App {
+impl<'a> TUI<'a> {
+  pub fn new(stats: Vec<(&'a str, u64)>) -> TUI<'a> {
+    TUI {
       stats: stats,
     }
   }
 }
 
 fn main() -> Result<(), io::Error> {
-  let stdout = io::stdout().into_raw_mode()?;
-  let backend = TermionBackend::new(stdout);
-  let mut terminal = Terminal::new(backend)?;
+  let args = App::new("conclusive")
+    .version("0.1.0")
+    .about("A command line client for Plausible Analytics.")
+    .author("マリウス <marius@マリウス.com>")
+    .arg(Arg::with_name("SITE-ID")
+      .help("Site ID")
+      .required(true)
+      .index(1)
+      .takes_value(true))
+    .arg(Arg::with_name("period")
+      .help("Period")
+      .short("p")
+      .long("period")
+      .takes_value(true))
+    .get_matches();
+
+  let site_id = args.value_of("SITE-ID").unwrap();
+  let period = args.value_of("period").unwrap_or("7d");
 
   let plausible_token = env::var("PLAUSIBLE_TOKEN").unwrap();
 
   let client = reqwest::blocking::Client::new();
-  let response = client.get(format!("https://plausible.io/api/v1/stats/timeseries?site_id={site_id}&period={period}", site_id = "xn--gckvb8fzb.com", period = "7d"))
+  let response = client.get(format!("https://plausible.io/api/v1/stats/timeseries?site_id={site_id}&period={period}", site_id = site_id, period = period))
     .bearer_auth(plausible_token)
     .send();
   let resp = response.unwrap();
@@ -76,9 +96,11 @@ fn main() -> Result<(), io::Error> {
 
   println!("{:#?}", stats);
 
+  let stdout = io::stdout().into_raw_mode()?;
+  let backend = TermionBackend::new(stdout);
+  let mut terminal = Terminal::new(backend)?;
 
-
-  let app = App::new(stats);
+  let app = TUI::new(stats);
 
   terminal.clear()?;
   terminal.draw(|f| {
@@ -87,17 +109,10 @@ fn main() -> Result<(), io::Error> {
     .margin(1)
     .constraints(
       [
-      Constraint::Percentage(10),
-      Constraint::Percentage(40),
-      Constraint::Percentage(50)
+      Constraint::Percentage(100)
       ].as_ref()
       )
     .split(f.size());
-
-    let block_overview = Block::default()
-    .title("Overview")
-    .borders(Borders::ALL);
-    f.render_widget(block_overview, chunks[0]);
 
     let barchart = BarChart::default()
     .block(Block::default().borders(Borders::ALL).title("Stats"))
@@ -112,28 +127,7 @@ fn main() -> Result<(), io::Error> {
       )
     .label_style(Style::default().fg(Color::Yellow))
     .bar_style(Style::default().fg(Color::Green));
-    f.render_widget(barchart, chunks[1]);
-
-    let chunks2 = Layout::default()
-    .direction(Direction::Horizontal)
-    .margin(0)
-    .constraints(
-      [
-      Constraint::Percentage(50),
-      Constraint::Percentage(50)
-      ].as_ref()
-      )
-    .split(chunks[2]);
-
-    let block_top_sources = Block::default()
-    .title("Top Sauces")
-    .borders(Borders::ALL);
-    f.render_widget(block_top_sources, chunks2[0]);
-
-    let block_top_pages = Block::default()
-    .title("Top Pages")
-    .borders(Borders::ALL);
-    f.render_widget(block_top_pages, chunks2[1]);
+    f.render_widget(barchart, chunks[0]);
   })
 }
 
