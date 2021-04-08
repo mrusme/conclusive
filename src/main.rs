@@ -11,9 +11,13 @@ use tui::{
   backend::TermionBackend,
   widgets::{
     Block,
-    Borders
+    Borders,
+    Cell,
+    Row,
+    Table
   },
   layout::{
+    Alignment,
     Layout,
     Constraint,
     Direction
@@ -23,21 +27,40 @@ use tui::{
     Color,
     Style
   },
+  text::{
+    Spans
+  },
   widgets::{
     BarChart,
+    Paragraph,
   },
 };
 use serde::Deserialize;
+use serde::de;
+
+#[derive(Deserialize, Debug)]
+struct TopPageResult {
+    bounce_rate: Option<f32>,
+    page: String,
+    visitors: Option<u64>,
+}
+
+#[derive(Deserialize, Debug)]
+struct TopSourceResult {
+    bounce_rate: Option<f32>,
+    source: String,
+    visitors: Option<u64>,
+}
 
 #[derive(Deserialize, Debug)]
 struct TimeseriesResult {
     date: String,
-    visitors: u64,
+    visitors: Option<u64>,
 }
 
 #[derive(Deserialize, Debug)]
-struct TimeseriesResponse {
-    results: Vec<TimeseriesResult>,
+struct ApiResponse<T> {
+    results: Vec<T>,
 }
 
 pub struct TUI<'a> {
@@ -50,6 +73,21 @@ impl<'a> TUI<'a> {
       stats: stats,
     }
   }
+}
+
+fn req<T: de::DeserializeOwned>(endpoint: &str, token: &str) -> Result<ApiResponse<T>, reqwest::blocking::Response> {
+  let client = reqwest::blocking::Client::new();
+  let response = client.get(endpoint)
+    .bearer_auth(token)
+    .send();
+  let resp = response.unwrap();
+
+  if resp.status().is_success() == false {
+    return Err(resp);
+  }
+
+  let timeseries: ApiResponse<T> = resp.json().unwrap();
+  return Ok(timeseries);
 }
 
 fn main() -> Result<(), io::Error> {
@@ -74,24 +112,55 @@ fn main() -> Result<(), io::Error> {
 
   let plausible_token = env::var("PLAUSIBLE_TOKEN").unwrap();
 
-  let client = reqwest::blocking::Client::new();
-  let response = client.get(format!("https://plausible.io/api/v1/stats/timeseries?site_id={site_id}&period={period}", site_id = site_id, period = period))
-    .bearer_auth(plausible_token)
-    .send();
-  let resp = response.unwrap();
+  // Top Sauces
+  // https://plausible.io/api/v1/stats/breakdown?site_id={site_id}&period={period}&property=visit:source&metrics=visitors,bounce_rate&limit=5
+  //
+  // Top Pages
+  // https://plausible.io/api/v1/stats/breakdown?site_id={site_id}&period={period}&property=event:page&metrics=visitors,bounce_rate&limit=5
+  //
 
-  if resp.status().is_success() == false {
-    println!("Error: {:#?}", resp);
-    std::process::exit(1);
-  }
+  // let response = client.get(format!("https://plausible.io/api/v1/stats/timeseries?site_id={site_id}&period={period}", site_id = site_id, period = period))
+  //   .bearer_auth(plausible_token)
+  //   .send();
+  // let resp = response.unwrap();
 
-  let timeseries: TimeseriesResponse = resp.json().unwrap();
+  // if resp.status().is_success() == false {
+  //   println!("Error: {:#?}", resp);
+  //   std::process::exit(1);
+  // }
+
+  let timeseries: ApiResponse<TimeseriesResult> = match req(&format!("https://plausible.io/api/v1/stats/timeseries?site_id={site_id}&period={period}", site_id = site_id, period = period), &plausible_token) {
+    Err(e) => {
+      println!("Error: {:#?}", e);
+      std::process::exit(1);
+    },
+    Ok(r) => r,
+  };
+
+  let top_sources: ApiResponse<TopSourceResult> = match req(&format!("https://plausible.io/api/v1/stats/breakdown?site_id={site_id}&period={period}&property=visit:source&metrics=visitors,bounce_rate&limit=5", site_id = site_id, period = period), &plausible_token) {
+    Err(e) => {
+      println!("Error: {:#?}", e);
+      std::process::exit(1);
+    },
+    Ok(r) => r,
+  };
+
+  let top_pages: ApiResponse<TopPageResult> = match req(&format!("https://plausible.io/api/v1/stats/breakdown?site_id={site_id}&period={period}&property=event:page&metrics=visitors,bounce_rate&limit=5", site_id = site_id, period = period), &plausible_token) {
+    Err(e) => {
+      println!("Error: {:#?}", e);
+      std::process::exit(1);
+    },
+    Ok(r) => r,
+  };
 
   let mut stats: Vec<(&str, u64)> = Vec::new();
+  let mut total_visitors: u64 = 0;
 
   for result in timeseries.results.iter() {
     let len = result.date.len();
-    stats.push((&result.date[len-2..], result.visitors));
+    let visitors: u64 = result.visitors.unwrap_or(0);
+    stats.push((&result.date[len-2..], visitors));
+    total_visitors += visitors;
   }
 
   println!("{:#?}", stats);
@@ -109,10 +178,41 @@ fn main() -> Result<(), io::Error> {
     .margin(1)
     .constraints(
       [
-      Constraint::Percentage(100)
+      Constraint::Length(5),
+      Constraint::Min(10),
+      Constraint::Length(16)
       ].as_ref()
       )
     .split(f.size());
+
+    let layout_overview = Layout::default()
+    .direction(Direction::Horizontal)
+    .margin(0)
+    .constraints(
+      [
+      Constraint::Percentage(25),
+      Constraint::Percentage(25),
+      Constraint::Percentage(25),
+      Constraint::Percentage(25)
+      ].as_ref()
+      )
+    .split(chunks[0]);
+
+    let block_overview_unique_visitors = Block::default()
+      .title("Total Visitors")
+      .borders(Borders::ALL);
+
+    let overview_text = vec![
+      Spans::from(""),
+      Spans::from(format!("{total_visitors}", total_visitors = total_visitors))
+    ];
+
+    let overview = Paragraph::new(overview_text)
+      .style(Style::default())
+      .block(block_overview_unique_visitors)
+      .alignment(Alignment::Center);
+
+    f.render_widget(overview, layout_overview[0]);
 
     let barchart = BarChart::default()
     .block(Block::default().borders(Borders::ALL).title("Stats"))
@@ -123,11 +223,70 @@ fn main() -> Result<(), io::Error> {
     .value_style(
       Style::default()
       .fg(Color::Black)
-      .bg(Color::Green),
+      .bg(Color::White),
       )
-    .label_style(Style::default().fg(Color::Yellow))
-    .bar_style(Style::default().fg(Color::Green));
-    f.render_widget(barchart, chunks[0]);
+    .label_style(Style::default().fg(Color::White))
+    .bar_style(Style::default().fg(Color::Rgb(107, 104, 242)));
+    f.render_widget(barchart, chunks[1]);
+
+    let chunks2 = Layout::default()
+    .direction(Direction::Horizontal)
+    .margin(0)
+    .constraints(
+      [
+      Constraint::Percentage(50),
+      Constraint::Percentage(50)
+      ].as_ref()
+      )
+    .split(chunks[2]);
+
+
+    let normal_style = Style::default().bg(Color::White);
+
+    let header_cells = ["Visitors", "Source", "BNC"]
+    .iter()
+    .map(|h| Cell::from(*h).style(Style::default().fg(Color::Black)));
+    let header = Row::new(header_cells)
+    .style(normal_style)
+    .height(1)
+    .bottom_margin(1);
+
+    let rows = top_sources.results.iter().map(|item| {
+      let cells = vec![Cell::from(format!("{}", item.visitors.unwrap_or(0))), Cell::from(format!("{}", item.source)), Cell::from(format!("{}%", item.bounce_rate.unwrap_or(0.0)))];
+      Row::new(cells).height(1 as u16).bottom_margin(1)
+    });
+
+    let t = Table::new(rows)
+    .header(header)
+    .block(Block::default().borders(Borders::ALL).title("Top Sauces"))
+    .widths(&[
+      Constraint::Length(10),
+      Constraint::Min(16),
+      Constraint::Length(5),
+      ]);
+    f.render_widget(t, chunks2[0]);
+
+
+    let header2_cells = ["Visitors", "Page", "BNC"]
+    .iter()
+    .map(|h| Cell::from(*h).style(Style::default().fg(Color::Black)));
+    let header2 = Row::new(header2_cells)
+    .style(normal_style)
+    .height(1)
+    .bottom_margin(1);
+    let rows2 = top_pages.results.iter().map(|item| {
+      let cells = vec![Cell::from(format!("{}", item.visitors.unwrap_or(0))), Cell::from(format!("{}", item.page)), Cell::from(format!("{}%", item.bounce_rate.unwrap_or(0.0)))];
+      Row::new(cells).height(1 as u16).bottom_margin(1)
+    });
+    let t = Table::new(rows2)
+    .header(header2)
+    .block(Block::default().borders(Borders::ALL).title("Top Pages"))
+    .widths(&[
+      Constraint::Length(10),
+      Constraint::Min(16),
+      Constraint::Length(5),
+      ]);
+    f.render_widget(t, chunks2[1]);
   })
 }
 
