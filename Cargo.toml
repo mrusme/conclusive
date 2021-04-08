@@ -1,0 +1,13 @@
+[package]
+name = "conclusive"
+version = "0.1.0"
+authors = ["マリウス <marius@xn--gckvb8fzb.com>"]
+edition = "2018"
+
+[dependencies]
+tui = "0.14"
+termion = "1.5"
+argh = "0.1.4"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
