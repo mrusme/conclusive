@@ -38,6 +38,8 @@ use tui::{
 use serde::Deserialize;
 use serde::de;
 
+const API_BASE_URL: &'static str = "https://plausible.io/api/v1/stats";
+
 #[derive(Deserialize, Debug)]
 struct TopPageResult {
     bounce_rate: Option<f32>,
@@ -75,7 +77,8 @@ impl<'a> TUI<'a> {
   }
 }
 
-fn req<T: de::DeserializeOwned>(endpoint: &str, token: &str) -> Result<ApiResponse<T>, reqwest::blocking::Response> {
+fn req<T: de::DeserializeOwned>(endpoint: &str, token: &str)
+-> Result<ApiResponse<T>, reqwest::blocking::Response> {
   let client = reqwest::blocking::Client::new();
   let response = client.get(endpoint)
     .bearer_auth(token)
@@ -90,7 +93,8 @@ fn req<T: de::DeserializeOwned>(endpoint: &str, token: &str) -> Result<ApiRespon
   return Ok(timeseries);
 }
 
-fn main() -> Result<(), io::Error> {
+fn main()
+-> Result<(), io::Error> {
   let args = App::new("conclusive")
     .version("0.1.0")
     .about("A command line client for Plausible Analytics.")
@@ -112,24 +116,13 @@ fn main() -> Result<(), io::Error> {
 
   let plausible_token = env::var("PLAUSIBLE_TOKEN").unwrap();
 
-  // Top Sauces
-  // https://plausible.io/api/v1/stats/breakdown?site_id={site_id}&period={period}&property=visit:source&metrics=visitors,bounce_rate&limit=5
-  //
-  // Top Pages
-  // https://plausible.io/api/v1/stats/breakdown?site_id={site_id}&period={period}&property=event:page&metrics=visitors,bounce_rate&limit=5
-  //
-
-  // let response = client.get(format!("https://plausible.io/api/v1/stats/timeseries?site_id={site_id}&period={period}", site_id = site_id, period = period))
-  //   .bearer_auth(plausible_token)
-  //   .send();
-  // let resp = response.unwrap();
-
-  // if resp.status().is_success() == false {
-  //   println!("Error: {:#?}", resp);
-  //   std::process::exit(1);
-  // }
-
-  let timeseries: ApiResponse<TimeseriesResult> = match req(&format!("https://plausible.io/api/v1/stats/timeseries?site_id={site_id}&period={period}", site_id = site_id, period = period), &plausible_token) {
+  let timeseries: ApiResponse<TimeseriesResult> =
+    match req(&format!(
+      "{api}/timeseries?site_id={site_id}&period={period}",
+      api = API_BASE_URL,
+      site_id = site_id,
+      period = period
+    ), &plausible_token) {
     Err(e) => {
       println!("Error: {:#?}", e);
       std::process::exit(1);
@@ -137,7 +130,14 @@ fn main() -> Result<(), io::Error> {
     Ok(r) => r,
   };
 
-  let top_sources: ApiResponse<TopSourceResult> = match req(&format!("https://plausible.io/api/v1/stats/breakdown?site_id={site_id}&period={period}&property=visit:source&metrics=visitors,bounce_rate&limit=5", site_id = site_id, period = period), &plausible_token) {
+  let top_sources: ApiResponse<TopSourceResult> =
+    match req(&format!(
+      "{api}/breakdown?site_id={site_id}&period={period}&{args}",
+      api = API_BASE_URL,
+      site_id = site_id,
+      period = period,
+      args = "property=visit:source&metrics=visitors,bounce_rate&limit=5"
+    ), &plausible_token) {
     Err(e) => {
       println!("Error: {:#?}", e);
       std::process::exit(1);
@@ -145,7 +145,14 @@ fn main() -> Result<(), io::Error> {
     Ok(r) => r,
   };
 
-  let top_pages: ApiResponse<TopPageResult> = match req(&format!("https://plausible.io/api/v1/stats/breakdown?site_id={site_id}&period={period}&property=event:page&metrics=visitors,bounce_rate&limit=5", site_id = site_id, period = period), &plausible_token) {
+  let top_pages: ApiResponse<TopPageResult> =
+    match req(&format!(
+      "{api}/breakdown?site_id={site_id}&period={period}&{args}",
+      api = API_BASE_URL,
+      site_id = site_id,
+      period = period,
+      args = "property=event:page&metrics=visitors,bounce_rate&limit=5"
+    ), &plausible_token) {
     Err(e) => {
       println!("Error: {:#?}", e);
       std::process::exit(1);
@@ -252,7 +259,11 @@ fn main() -> Result<(), io::Error> {
     .bottom_margin(1);
 
     let rows = top_sources.results.iter().map(|item| {
-      let cells = vec![Cell::from(format!("{}", item.visitors.unwrap_or(0))), Cell::from(format!("{}", item.source)), Cell::from(format!("{}%", item.bounce_rate.unwrap_or(0.0)))];
+      let cells = vec![
+        Cell::from(format!("{}", item.visitors.unwrap_or(0))),
+        Cell::from(format!("{}", item.source)),
+        Cell::from(format!("{}%", item.bounce_rate.unwrap_or(0.0)))
+      ];
       Row::new(cells).height(1 as u16).bottom_margin(1)
     });
 
@@ -275,7 +286,11 @@ fn main() -> Result<(), io::Error> {
     .height(1)
     .bottom_margin(1);
     let rows2 = top_pages.results.iter().map(|item| {
-      let cells = vec![Cell::from(format!("{}", item.visitors.unwrap_or(0))), Cell::from(format!("{}", item.page)), Cell::from(format!("{}%", item.bounce_rate.unwrap_or(0.0)))];
+      let cells = vec![
+        Cell::from(format!("{}", item.visitors.unwrap_or(0))),
+        Cell::from(format!("{}", item.page)),
+        Cell::from(format!("{}%", item.bounce_rate.unwrap_or(0.0)))
+      ];
       Row::new(cells).height(1 as u16).bottom_margin(1)
     });
     let t = Table::new(rows2)
