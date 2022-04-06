@@ -1,8 +1,15 @@
 [package]
 name = "conclusive"
+description = "A command line client for Plausible Analytics"
 version = "0.1.0"
 authors = ["マリウス <marius@xn--gckvb8fzb.com>"]
+license = "GPL-3.0"
 edition = "2018"
+readme = "README.md"
+homepage = "https://xn--gckvb8fzb.com/conclusive-a-command-line-client-for-plausible-analytics/"
+repository = "https://github.com/mrusme/conclusive"
+keywords = ["cli", "tui", "plausible", "analytics", "tool"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 tui = "0.14"
