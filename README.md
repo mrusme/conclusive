@@ -7,6 +7,13 @@ Conclusive. A command line client for
 *(thanks to Marko from Plausible.io for providing me a demo account to take this screenshot!)*
 
 
+## Installing
+
+```sh
+cargo install conclusive
+```
+
+
 ## Building
 
 Clone this repository, `cd` into it on a terminal and build the binary:
