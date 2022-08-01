@@ -55,6 +55,19 @@ struct TopSourceResult {
 }
 
 #[derive(Deserialize, Debug)]
+struct AggregateValue {
+    value: Option<u64>,
+}
+
+#[derive(Deserialize, Debug)]
+struct AggregateResult {
+    bounce_rate: AggregateValue,
+    pageviews: AggregateValue,
+    visit_duration: AggregateValue,
+    visitors: AggregateValue,
+}
+
+#[derive(Deserialize, Debug)]
 struct TimeseriesResult {
     date: String,
     visitors: Option<u64>,
@@ -62,7 +75,7 @@ struct TimeseriesResult {
 
 #[derive(Deserialize, Debug)]
 struct ApiResponse<T> {
-    results: Vec<T>,
+    results: T,
 }
 
 pub struct TUI<'a> {
@@ -106,17 +119,31 @@ fn main()
       .takes_value(true))
     .arg(Arg::with_name("period")
       .help("Period")
-      .short("p")
+      .short('p')
       .long("period")
       .takes_value(true))
     .get_matches();
 
   let site_id = args.value_of("SITE-ID").unwrap();
-  let period = args.value_of("period").unwrap_or("7d");
+  let period = args.value_of("period").unwrap_or("30d");
 
   let plausible_token = env::var("PLAUSIBLE_TOKEN").unwrap();
 
-  let timeseries: ApiResponse<TimeseriesResult> =
+  let aggregate: ApiResponse<AggregateResult> =
+    match req(&format!(
+      "{api}/aggregate?site_id={site_id}&period={period}&metrics=visitors,pageviews,bounce_rate,visit_duration",
+      api = API_BASE_URL,
+      site_id = site_id,
+      period = period
+    ), &plausible_token) {
+    Err(e) => {
+      println!("Error: {:#?}", e);
+      std::process::exit(1);
+    },
+    Ok(r) => r,
+  };
+
+  let timeseries: ApiResponse<Vec<TimeseriesResult>> =
     match req(&format!(
       "{api}/timeseries?site_id={site_id}&period={period}",
       api = API_BASE_URL,
@@ -130,13 +157,13 @@ fn main()
     Ok(r) => r,
   };
 
-  let top_sources: ApiResponse<TopSourceResult> =
+  let top_sources: ApiResponse<Vec<TopSourceResult>> =
     match req(&format!(
       "{api}/breakdown?site_id={site_id}&period={period}&{args}",
       api = API_BASE_URL,
       site_id = site_id,
       period = period,
-      args = "property=visit:source&metrics=visitors,bounce_rate&limit=5"
+      args = "property=visit:source&metrics=visitors,bounce_rate&limit=10"
     ), &plausible_token) {
     Err(e) => {
       println!("Error: {:#?}", e);
@@ -145,13 +172,13 @@ fn main()
     Ok(r) => r,
   };
 
-  let top_pages: ApiResponse<TopPageResult> =
+  let top_pages: ApiResponse<Vec<TopPageResult>> =
     match req(&format!(
       "{api}/breakdown?site_id={site_id}&period={period}&{args}",
       api = API_BASE_URL,
       site_id = site_id,
       period = period,
-      args = "property=event:page&metrics=visitors,bounce_rate&limit=5"
+      args = "property=event:page&metrics=visitors,bounce_rate&limit=10"
     ), &plausible_token) {
     Err(e) => {
       println!("Error: {:#?}", e);
@@ -161,13 +188,11 @@ fn main()
   };
 
   let mut stats: Vec<(&str, u64)> = Vec::new();
-  let mut total_visitors: u64 = 0;
 
   for result in timeseries.results.iter() {
     let len = result.date.len();
     let visitors: u64 = result.visitors.unwrap_or(0);
     stats.push((&result.date[len-2..], visitors));
-    total_visitors += visitors;
   }
 
   println!("{:#?}", stats);
@@ -179,7 +204,7 @@ fn main()
   let app = TUI::new(stats);
 
   terminal.clear()?;
-  terminal.draw(|f| {
+  let _drawn = match terminal.draw(|f| {
     let chunks = Layout::default()
     .direction(Direction::Vertical)
     .margin(1)
@@ -205,22 +230,75 @@ fn main()
       )
     .split(chunks[0]);
 
-    let block_overview_unique_visitors = Block::default()
+    // Total Visitors
+    let block_overview_visitors = Block::default()
       .title("Total Visitors")
       .borders(Borders::ALL);
 
-    let overview_text = vec![
+    let overview_visitors_text = vec![
       Spans::from(""),
-      Spans::from(format!("{total_visitors}", total_visitors = total_visitors))
+      Spans::from(format!("{total_visitors}", total_visitors = aggregate.results.visitors.value.unwrap_or(0)))
     ];
 
-    let overview = Paragraph::new(overview_text)
+    let overview_visitors = Paragraph::new(overview_visitors_text)
       .style(Style::default())
-      .block(block_overview_unique_visitors)
+      .block(block_overview_visitors)
       .alignment(Alignment::Center);
 
-    f.render_widget(overview, layout_overview[0]);
+    f.render_widget(overview_visitors, layout_overview[0]);
 
+    // Total Pageviews
+    let block_overview_pageviews = Block::default()
+      .title("Total Pageviews")
+      .borders(Borders::ALL);
+
+    let overview_pageviews_text = vec![
+      Spans::from(""),
+      Spans::from(format!("{total_pageviews}", total_pageviews = aggregate.results.pageviews.value.unwrap_or(0)))
+    ];
+
+    let overview_pageviews = Paragraph::new(overview_pageviews_text)
+      .style(Style::default())
+      .block(block_overview_pageviews)
+      .alignment(Alignment::Center);
+
+    f.render_widget(overview_pageviews, layout_overview[1]);
+
+    // Bounce Rate
+    let block_overview_bounce = Block::default()
+      .title("Bounce Rate")
+      .borders(Borders::ALL);
+
+    let overview_bounce_text = vec![
+      Spans::from(""),
+      Spans::from(format!("{bounce_rate}%", bounce_rate = aggregate.results.bounce_rate.value.unwrap_or(0)))
+    ];
+
+    let overview_bounce = Paragraph::new(overview_bounce_text)
+      .style(Style::default())
+      .block(block_overview_bounce)
+      .alignment(Alignment::Center);
+
+    f.render_widget(overview_bounce, layout_overview[2]);
+
+    // Visit Duration
+    let block_overview_duration = Block::default()
+      .title("Visit Duration")
+      .borders(Borders::ALL);
+
+    let overview_duration_text = vec![
+      Spans::from(""),
+      Spans::from(format!("{visit_duration}s", visit_duration = aggregate.results.visit_duration.value.unwrap_or(0)))
+    ];
+
+    let overview_duration = Paragraph::new(overview_duration_text)
+      .style(Style::default())
+      .block(block_overview_duration)
+      .alignment(Alignment::Center);
+
+    f.render_widget(overview_duration, layout_overview[3]);
+
+    // Bar Chart
     let barchart = BarChart::default()
     .block(Block::default().borders(Borders::ALL).title("Stats"))
     .data(&app.stats)
@@ -286,14 +364,14 @@ fn main()
     .height(1)
     .bottom_margin(1);
     let rows2 = top_pages.results.iter().map(|item| {
-      let cells = vec![
+      let cells2 = vec![
         Cell::from(format!("{}", item.visitors.unwrap_or(0))),
         Cell::from(format!("{}", item.page)),
         Cell::from(format!("{}%", item.bounce_rate.unwrap_or(0.0)))
       ];
-      Row::new(cells).height(1 as u16).bottom_margin(1)
+      Row::new(cells2).height(1 as u16).bottom_margin(1)
     });
-    let t = Table::new(rows2)
+    let t2 = Table::new(rows2)
     .header(header2)
     .block(Block::default().borders(Borders::ALL).title("Top Pages"))
     .widths(&[
@@ -301,7 +379,10 @@ fn main()
       Constraint::Min(16),
       Constraint::Length(5),
       ]);
-    f.render_widget(t, chunks2[1]);
-  })
+    f.render_widget(t2, chunks2[1]);
+  }) {
+    Ok(_) => return Ok(()),
+    Err(e) => return Err(e),
+  };
 }
 
